@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<module>
+    <name>icustomization</name>
+    <displayName><![CDATA[ICustomization]]></displayName>
+    <version><![CDATA[1.0.0]]></version>
+    <description><![CDATA[Allow hide customization save button on product page -and  append function by add to cart button]]></description>
+    <author><![CDATA[thuydtshop@gmail.com]]></author>
+    <tab><![CDATA[front_office_features]]></tab>
+    <is_configurable>1</is_configurable>
+    <need_instance>0</need_instance>
+	<limited_countries></limited_countries>
+</module>
