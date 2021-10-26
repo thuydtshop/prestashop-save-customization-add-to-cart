@@ -36,7 +36,7 @@ class Icustomization extends Module
     {
         $this->name = 'icustomization';
         $this->tab = 'front_office_features';
-        $this->version = '1.1.0';
+        $this->version = '1.0.0';
         $this->author = 'thuydtshop@gmail.com';
         $this->need_instance = 0;
 
@@ -192,6 +192,7 @@ class Icustomization extends Module
 
             if ($controller_name == 'product') {
                 $this->context->controller->addJS($this->_path.'/views/js/front.js');
+                $this->context->controller->addCSS($this->_path.'/views/css/front.css');
             }
         }
     }
