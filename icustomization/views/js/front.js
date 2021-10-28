@@ -35,6 +35,7 @@ var icustomization = {
 			$('#add-to-cart-or-refresh button.add-to-cart').prop('disabled', false);
 		}
 
+		$('#add-to-cart-or-refresh button.add-to-cart').off('click', icustomization.save);
 		$('#add-to-cart-or-refresh button.add-to-cart').on('click', icustomization.save);
 	},
 	save: function() {
@@ -79,11 +80,9 @@ var icustomization = {
 		  	$('button[name="submitCustomizedData"]').css('display', 'none');
 
 	  		if ($('#product-availability.product-unavailable').length > 0) {
-		  		console.log('len 1');
 		  		$('#add-to-cart-or-refresh button.add-to-cart').prop('disabled', true);
 		  	} else {
 		  		$('#add-to-cart-or-refresh button.add-to-cart').prop('disabled', false);
-		  		console.log('len 0');
 		  	}
 		});
 	}
@@ -93,4 +92,10 @@ var icustomization = {
 $(document).ready(function() {
 	icustomization.init();
 	icustomization.reCheck();
+});
+
+
+$('body').on('DOMSubtreeModified', '.product-actions', function() {
+	icustomization.init();
+	//icustomization.reCheck();
 });

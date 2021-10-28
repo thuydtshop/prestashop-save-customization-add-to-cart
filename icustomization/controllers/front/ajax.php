@@ -1,28 +1,7 @@
 <?php 
-/**
-* 2007-2021 PrestaShop
-*
-* NOTICE OF LICENSE
-*
-* This source file is subject to the Academic Free License (AFL 3.0)
-* that is bundled with this package in the file LICENSE.txt.
-* It is also available through the world-wide-web at this URL:
-* http://opensource.org/licenses/afl-3.0.php
-* If you did not receive a copy of the license and are unable to
-* obtain it through the world-wide-web, please send an email
-* to license@prestashop.com so we can send you a copy immediately.
-*
-* DISCLAIMER
-*
-* Do not edit or add to this file if you wish to upgrade PrestaShop to newer
-* versions in the future. If you wish to customize PrestaShop for your
-* needs please refer to http://www.prestashop.com for more information.
-*
-*  @author    PrestaShop SA <contact@prestashop.com>
-*  @copyright 2007-2021 PrestaShop SA
-*  @license   http://opensource.org/licenses/afl-3.0.php  Academic Free License (AFL 3.0)
-*  International Registered Trademark & Property of PrestaShop SA
-*/
+
+use PrestaShop\PrestaShop\Adapter\Presenter\Object\ObjectPresenter;
+use PrestaShop\PrestaShop\Core\Product\ProductExtraContentFinder;
 
 class IcustomizationAjaxModuleFrontController extends ModuleFrontController
 {
@@ -39,8 +18,6 @@ class IcustomizationAjaxModuleFrontController extends ModuleFrontController
     		header('Content-Type: application/json');
         	die(json_encode([]));
     	}
-
-        ///ob_end_clean();
 
     	// If cart has not been saved, we need to do it so that customization fields can have an id_cart
         // We check that the cookie exists first to avoid ghost carts
@@ -59,9 +36,22 @@ class IcustomizationAjaxModuleFrontController extends ModuleFrontController
 
         $id_customization = empty($customization_datas) ? null : $customization_datas[0]['id_customization'];
 
-        ///Cart::resetStaticCache();
-        $product_full = Product::getProductProperties($this->context->language->id, $this->product, $this->context);
-        $this->addProductCustomizationData();
+        $objectPresenter = new ObjectPresenter();
+        $extraContentFinder = new ProductExtraContentFinder();
+
+        $product_ = $objectPresenter->present($this->product);
+        $product_['id_product'] = (int) $this->product->id;
+        $product_['out_of_stock'] = (int) $this->product->out_of_stock;
+        $product_['new'] = (int) $this->product->new;
+        $product_['id_product_attribute'] = $this->getIdProductAttributeByGroupOrRequestOrDefault();
+        $product_['minimal_quantity'] = $this->getProductMinimalQuantity($product_);
+        $product_['quantity_wanted'] = $this->getRequiredQuantity($product_);
+        $product_['extraContent'] = $extraContentFinder->addParams(['product' => $this->product])->present();
+
+        $product_['ecotax'] = Tools::convertPrice($this->getProductEcotax($product_), $this->context->currency, true, $this->context);
+
+        $product_full = Product::getProductProperties($this->context->language->id, $product_, $this->context);
+        $this->addProductCustomizationData($product_full);
 
         echo $id_customization;
         exit;
@@ -222,5 +212,165 @@ class IcustomizationAjaxModuleFrontController extends ModuleFrontController
         }
 
         return $product_full;
+    }
+
+    protected function getRequiredQuantity($product)
+    {
+        $requiredQuantity = (int) Tools::getValue('quantity_wanted', $this->getProductMinimalQuantity($product));
+        if ($requiredQuantity < $product['minimal_quantity']) {
+            $requiredQuantity = $product['minimal_quantity'];
+        }
+
+        return $requiredQuantity;
+    }
+
+    protected function getProductMinimalQuantity($product)
+    {
+        $minimal_quantity = 1;
+
+        if ($product['id_product_attribute']) {
+            $combination = $this->findProductCombinationById($product['id_product_attribute']);
+            if ($combination['minimal_quantity']) {
+                $minimal_quantity = $combination['minimal_quantity'];
+            }
+        } else {
+            $minimal_quantity = $this->product->minimal_quantity;
+        }
+
+        return $minimal_quantity;
+    }
+
+    protected function findProductCombinationById($combinationId)
+    {
+        $combinations = $this->product->getAttributesGroups($this->context->language->id, $combinationId);
+
+        if ($combinations === false || !is_array($combinations) || empty($combinations)) {
+            return null;
+        }
+
+        return reset($combinations);
+    }
+
+    protected function getIdProductAttributeByGroupOrRequestOrDefault()
+    {
+        $idProductAttribute = $this->getIdProductAttributeByGroup();
+        if (null === $idProductAttribute) {
+            $idProductAttribute = (int) Tools::getValue('id_product_attribute');
+        }
+
+        if (0 === $idProductAttribute) {
+            $idProductAttribute = (int) Product::getDefaultAttribute($this->product->id);
+        }
+
+        return $this->tryToGetAvailableIdProductAttribute($idProductAttribute);
+    }
+
+    protected function getIdProductAttributeByGroup()
+    {
+        $groups = Tools::getValue('group');
+        if (empty($groups)) {
+            return null;
+        }
+
+        return (int) Product::getIdProductAttributeByIdAttributes(
+            $this->product->id,
+            $groups,
+            true
+        );
+    }
+
+    protected function tryToGetAvailableIdProductAttribute($checkedIdProductAttribute)
+    {
+        if (!Configuration::get('PS_DISP_UNAVAILABLE_ATTR')) {
+            $productCombinations = $this->product->getAttributeCombinations();
+            if (!Product::isAvailableWhenOutOfStock($this->product->out_of_stock)) {
+                $availableProductAttributes = array_filter(
+                    $productCombinations,
+                    function ($elem) {
+                        return $elem['quantity'] > 0;
+                    }
+                );
+            } else {
+                $availableProductAttributes = $productCombinations;
+            }
+
+            $availableProductAttribute = array_filter(
+                $availableProductAttributes,
+                function ($elem) use ($checkedIdProductAttribute) {
+                    return $elem['id_product_attribute'] == $checkedIdProductAttribute;
+                }
+            );
+
+            if (empty($availableProductAttribute) && count($availableProductAttributes)) {
+                // if selected combination is NOT available ($availableProductAttribute) but they are other alternatives ($availableProductAttributes), then we'll try to get the closest.
+                if (!Product::isAvailableWhenOutOfStock($this->product->out_of_stock)) {
+                    // first lets get information of the selected combination.
+                    $checkProductAttribute = array_filter(
+                        $productCombinations,
+                        function ($elem) use ($checkedIdProductAttribute) {
+                            return $elem['id_product_attribute'] == $checkedIdProductAttribute || (!$checkedIdProductAttribute && $elem['default_on']);
+                        }
+                    );
+                    if (count($checkProductAttribute)) {
+                        // now lets find other combinations for the selected attributes.
+                        $alternativeProductAttribute = [];
+                        foreach ($checkProductAttribute as $key => $attribute) {
+                            $alternativeAttribute = array_filter(
+                                $availableProductAttributes,
+                                function ($elem) use ($attribute) {
+                                    return $elem['id_attribute'] == $attribute['id_attribute'] && !$elem['is_color_group'];
+                                }
+                            );
+                            foreach ($alternativeAttribute as $key => $value) {
+                                $alternativeProductAttribute[$key] = $value;
+                            }
+                        }
+
+                        if (count($alternativeProductAttribute)) {
+                            // if alternative combination is found, order the list by quantity to use the one with more stock.
+                            usort($alternativeProductAttribute, function ($a, $b) {
+                                if ($a['quantity'] == $b['quantity']) {
+                                    return 0;
+                                }
+
+                                return ($a['quantity'] > $b['quantity']) ? -1 : 1;
+                            });
+
+                            return (int) array_shift($alternativeProductAttribute)['id_product_attribute'];
+                        }
+                    }
+                }
+
+                return (int) array_shift($availableProductAttributes)['id_product_attribute'];
+            }
+        }
+
+        return $checkedIdProductAttribute;
+    }
+
+    protected function getProductEcotax(array $product): float
+    {
+        $ecotax = $product['ecotax'];
+
+        if ($product['id_product_attribute']) {
+            $combination = $this->findProductCombinationById($product['id_product_attribute']);
+            if (isset($combination['ecotax']) && $combination['ecotax'] > 0) {
+                $ecotax = $combination['ecotax'];
+            }
+        }
+        if ($ecotax) {
+            // Try to get price display from already assigned smarty variable for better performance
+            $priceDisplay = $this->context->smarty->getTemplateVars('priceDisplay');
+            if (null === $priceDisplay) {
+                $priceDisplay = Product::getTaxCalculationMethod((int) $this->context->cookie->id_customer);
+            }
+
+            $useTax = $priceDisplay == 0;
+            if ($useTax) {
+                $ecotax *= (1 + Tax::getProductEcotaxRate() / 100);
+            }
+        }
+
+        return (float) $ecotax;
     }
 }
