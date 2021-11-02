@@ -53,8 +53,10 @@ class IcustomizationAjaxModuleFrontController extends ModuleFrontController
         $product_full = Product::getProductProperties($this->context->language->id, $product_, $this->context);
         $this->addProductCustomizationData($product_full);
 
-        ob_end_clean();
-        Cart::getProducts(true); // fixed have to refresh shopping cart to show customization
+        $this->context->cart->getProducts(true); // fixed have to refresh shopping cart to show customization
+
+        CartRule::autoRemoveFromCart();
+        CartRule::autoAddToCart();
 
         echo $id_customization;
         exit;
